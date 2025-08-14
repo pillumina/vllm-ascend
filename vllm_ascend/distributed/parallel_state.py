@@ -58,6 +58,11 @@ def init_ascend_model_parallel(
         # When MLP TP is enabled, mlp_tp_size follows data_parallel_size
         mlp_tp = data_parallel_size
         
+        # Add logging for MLP TP initialization
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"MLP TP enabled: mlp_tp_size={mlp_tp}, data_parallel_size={data_parallel_size}")
+        
         all_ranks_mlp_head = torch.arange(world_size).reshape(
             -1, mlp_tp, pipeline_parallel_size, 1)  # noqa
         group_ranks = all_ranks_mlp_head.view(-1, mlp_tp).unbind(0)
@@ -68,6 +73,11 @@ def init_ascend_model_parallel(
                                                 get_world_group().local_rank,
                                                 backend,
                                                 group_name="mlp_tp")
+        logger.info(f"MLP TP group initialized successfully with {len(group_ranks)} groups")
+    else:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("MLP TP disabled: using standard tensor parallel for MLP layers")
 
 def get_lm_tensor_model_parallel_world_size():
     """Return world size for the tensor model parallel group."""
