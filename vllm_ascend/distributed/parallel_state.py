@@ -26,6 +26,7 @@ def init_ascend_model_parallel(
     expert_parallel_size: int = 1,
     pipeline_parallel_size: int = 1,
     backend: Optional[str] = None,
+    data_parallel_size: int = 1,
 ):
     if model_parallel_initialized():
         return
@@ -48,18 +49,25 @@ def init_ascend_model_parallel(
     
     global _MLP_TP
     assert _MLP_TP is None, ("mlp tensor model parallel group is already initialized")
-    mlp_tp  = 4
     
-    all_ranks_mlp_head = torch.arange(world_size).reshape(
-        -1, mlp_tp, pipeline_parallel_size, 1)  # noqa
-    group_ranks = all_ranks_mlp_head.view(-1, mlp_tp).unbind(0)
-    group_ranks = [x.tolist() for x in group_ranks]
+    # Initialize MLP TP group only when ENABLE_MLP_TP is true
+    import vllm_ascend.envs as ascend_envs
+    enable_mlp_tp = bool(ascend_envs.ENABLE_MLP_TP)
     
-    # message queue broadcaster is only used in tensor model parallel group
-    _MLP_TP = init_model_parallel_group(group_ranks,
-                                            get_world_group().local_rank,
-                                            backend,
-                                            group_name="mlp_tp")
+    if enable_mlp_tp:
+        # When MLP TP is enabled, mlp_tp_size follows data_parallel_size
+        mlp_tp = data_parallel_size
+        
+        all_ranks_mlp_head = torch.arange(world_size).reshape(
+            -1, mlp_tp, pipeline_parallel_size, 1)  # noqa
+        group_ranks = all_ranks_mlp_head.view(-1, mlp_tp).unbind(0)
+        group_ranks = [x.tolist() for x in group_ranks]
+        
+        # message queue broadcaster is only used in tensor model parallel group
+        _MLP_TP = init_model_parallel_group(group_ranks,
+                                                get_world_group().local_rank,
+                                                backend,
+                                                group_name="mlp_tp")
 
 def get_lm_tensor_model_parallel_world_size():
     """Return world size for the tensor model parallel group."""

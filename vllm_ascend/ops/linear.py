@@ -163,7 +163,6 @@ class AttnColumnParallelLinear(LinearBase):
         self, input_
     ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
         bias = self.bias if not self.skip_bias_add else None
-        # self.global_batch_size = vllm_config.scheduler_config.max_num_seqs
         # Matrix multiply.
         assert self.quant_method is not None
         forward_context = get_forward_context()

@@ -157,6 +157,10 @@ env_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_ASCEND_KV_CACHE_MEGABYTES_FLOATING_TOLERANCE":
     lambda: int(
         os.getenv("VLLM_ASCEND_KV_CACHE_MEGABYTES_FLOATING_TOLERANCE", '0')),
+    # Whether to enable MLP-only tensor parallelism (attn-tp off, mlp-tp on).
+    # If set to true, MLP TP size will follow DP size.
+    "ENABLE_MLP_TP":
+    lambda: bool(int(os.getenv("ENABLE_MLP_TP", '0'))),
 }
 
 # end-env-vars-definition

@@ -67,37 +67,46 @@ class CustomQwen2MLP(nn.Module):
         prefix: str = "",
     ) -> None:
         super().__init__()
-        self.gate_up_proj = ATTNMergedColumnParallelLinear(
-            hidden_size,
-            [intermediate_size] * 2,
-            bias=False,
-            quant_config=quant_config,
-            prefix=f"{prefix}.gate_up_proj",
-        )
-        self.down_proj = AttnRowParallelLinear(
-            intermediate_size,
-            hidden_size,
-            bias=False,
-            quant_config=quant_config,
-            prefix=f"{prefix}.down_proj",
-        )
-        # self.gate_up_proj = MergedColumnParallelLinear(
-        #     hidden_size,
-        #     [intermediate_size] * 2,
-        #     bias=False,
-        #     quant_config=quant_config,
-        #     prefix=f"{prefix}.gate_up_proj",
-        # )
-        # self.down_proj = RowParallelLinear(
-        #     intermediate_size,
-        #     hidden_size,
-        #     bias=False,
-        #     quant_config=quant_config,
-        #     prefix=f"{prefix}.down_proj",
-        # )
-        # if hidden_act != "silu":
-        #     raise ValueError(f"Unsupported activation: {hidden_act}. "
-        #                      "Only silu is supported for now.")
+        
+        # Check if MLP TP is enabled via environment variable
+        import vllm_ascend.envs as ascend_envs
+        enable_mlp_tp = bool(ascend_envs.ENABLE_MLP_TP)
+        
+        if enable_mlp_tp:
+            # Use MLP TP versions: attention not split, MLP split by DP size
+            self.gate_up_proj = ATTNMergedColumnParallelLinear(
+                hidden_size,
+                [intermediate_size] * 2,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.gate_up_proj",
+            )
+            self.down_proj = AttnRowParallelLinear(
+                intermediate_size,
+                hidden_size,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.down_proj",
+            )
+        else:
+            # Use standard TP versions: follow original TP size
+            from vllm.model_executor.layers.linear import (MergedColumnParallelLinear, 
+                                                            RowParallelLinear)
+            self.gate_up_proj = MergedColumnParallelLinear(
+                hidden_size,
+                [intermediate_size] * 2,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.gate_up_proj",
+            )
+            self.down_proj = RowParallelLinear(
+                intermediate_size,
+                hidden_size,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.down_proj",
+            )
+        
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
