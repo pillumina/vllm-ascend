@@ -22,6 +22,8 @@ from vllm.model_executor.layers.vocab_parallel_embedding import \
 from tests.ut.base import TestBase
 from vllm_ascend.ops.vocab_parallel_embedding import (
     get_masked_input_and_mask, vocab_parallel_embedding_forward)
+from vllm_ascend.ops.vocab_parallel_embedding import (
+    AscendLogitsProcessor, AscendParallelLMHead, AscendVocabParallelEmbedding)
 
 VOCAB_PARALLEL_EMBEDDING_TEST_NUM_RANDOM_SEEDS = 128
 
@@ -188,6 +190,41 @@ class TestVocabParallelEmbedding(TestBase):
         self.mock_embedding.quant_method.embedding = MagicMock(
             side_effect=lambda _, x: torch.randn(x.shape[0], self.embedding_dim
                                                  ))
+        self.org_num_embeddings = 40
+        self.padding_size = 8
+
+    def _create_layer(self):
+        # Patch methods and dependencies for VocabParallelEmbedding
+        mock_group = MagicMock()
+        mock_group.world_size = 2
+        mock_group.rank_in_group = 0
+        with patch("vllm_ascend.ops.vocab_parallel_embedding.get_tp_group", return_value=mock_group), \
+            patch("vllm.model_executor.layers.vocab_parallel_embedding.get_tensor_model_parallel_rank", return_value=0), \
+            patch("vllm.model_executor.layers.vocab_parallel_embedding.get_tensor_model_parallel_world_size", return_value=2), \
+            patch("vllm.model_executor.layers.vocab_parallel_embedding.pad_vocab_size", side_effect=lambda x, y: x + y), \
+            patch("vllm.model_executor.layers.vocab_parallel_embedding.divide", side_effect=lambda x, y: x // y):
+
+            # Create an instance of VocabParallelEmbedding
+            layer = AscendVocabParallelEmbedding(
+                num_embeddings=self.num_embeddings,
+                embedding_dim=self.embedding_dim,
+                org_num_embeddings=self.org_num_embeddings,
+                padding_size=self.padding_size,
+                quant_config=None,  # Mock quantization config
+                prefix="")
+
+            layer.shard_indices = MagicMock()
+            layer.shard_indices.org_vocab_start_index = 10
+            layer.shard_indices.org_vocab_end_index = 20
+            layer.shard_indices.num_org_vocab_padding = 5
+            layer.shard_indices.added_vocab_start_index = 30
+            layer.shard_indices.added_vocab_end_index = 40
+
+            # Mock the quantization method
+            layer.quant_method.embedding = MagicMock(
+                side_effect=lambda _, x: torch.randn(x.shape[0], self.
+                                                     embedding_dim))
+            return layer
 
     def test_get_masked_input_and_mask(self):
         """Test the mask and offset calculation helper function."""
@@ -297,3 +334,55 @@ class TestVocabParallelEmbedding(TestBase):
                     output = vocab_parallel_embedding_forward(
                         self.mock_embedding, input_)
                 self.assertEqual(output.shape, expected_shape)
+
+
+class TestAscendLogitsProcessor(unittest.TestCase):
+
+    def setUp(self):
+        self.vocab_size = 50
+        self.num_embeddings = 50
+        self.embedding_dim = 10
+        self.org_num_embeddings = 40
+        self.padding_size = 8
+
+        self.mock_group = MagicMock()
+        self.mock_group.world_size = 2
+        self.mock_group.rank_in_group = 0
+        self.mock_ascend_config = MagicMock()
+        self.mock_quant_method = MagicMock()
+        self.mock_quant_method.apply = MagicMock(
+            return_value=torch.randn(1, self.vocab_size))
+        self.patches = [
+            patch("vllm_ascend.ascend_config.get_ascend_config",
+                  return_value=self.mock_ascend_config),
+            patch(
+                "vllm_ascend.ops.vocab_parallel_embedding.get_lmhead_tp_group",
+                return_value=self.mock_group),
+            patch("vllm_ascend.ops.vocab_parallel_embedding.lmhead_tp_enable",
+                  return_value=True),
+            patch(
+                "vllm_ascend.ops.vocab_parallel_embedding.get_lmhead_tp_group.all_to_all",
+                return_value=torch.randn(1, self.vocab_size))
+        ]
+
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+
+    def test_create_processor(self):
+        processor = AscendLogitsProcessor(vocab_size=self.vocab_size)
+        self.assertEqual(processor.vocab_size, self.vocab_size)
+
+    def test_get_logits(self):
+        processor = AscendLogitsProcessor(vocab_size=self.vocab_size)
+        lmhead = AscendParallelLMHead(num_embeddings=self.num_embeddings,
+                                      embedding_dim=self.embedding_dim,
+                                      prefix="lm_head")
+        lmhead.quant_method = self.mock_quant_method
+        lmhead.quant_method.apply = self.mock_quant_method.apply
+        hidden_state = torch.randn(1, self.org_num_embeddings)
+        processor._get_logits(hidden_state, lmhead)
+        self.mock_quant_method.apply.assert_called_once()

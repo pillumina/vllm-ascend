@@ -27,7 +27,7 @@ from vllm_ascend.models.deepseek_v2 import (
     CustomDeepseekV2MLP, CustomDeepseekV2MoE,
     CustomDeepseekV2RowParallelLinear,
     CustomDeepseekV2RowParallelLinearReplaceAllreduce,
-    CustomDeepseekV2SiluAndMul)
+    CustomDeepseekV2SiluAndMul, LogitsProcessor, ParallelLMHead)
 
 
 @pytest.fixture
@@ -317,3 +317,29 @@ def test_custom_deepseek_v2_for_causal_lm(mock_distributed, vllm_config):
     ):
         loaded = model.load_weights(weights)
         assert loaded is not None
+        
+def test_deepseek_v2_lmhead(mock_distributed, vllm_config):
+    # 创建一个简单的配置对象
+    class SimpleConfig:
+
+        def __init__(self):
+            self.vocab_size = 10000
+            self.hidden_size = 128
+
+    config = SimpleConfig()
+
+    # 直接创建lmhead和logits_processor
+    lmhead = ParallelLMHead(config.vocab_size, config.hidden_size)
+    logits_processor = LogitsProcessor(config.vocab_size)
+
+    # 创建模拟输出
+    mock_output = torch.randn(2, 4, config.hidden_size)
+    mock_logits = torch.randn(2, 4, config.vocab_size)
+
+    # 直接测试logits_processor
+    with patch.object(lmhead.quant_method, "apply", return_value=mock_logits):
+        with patch.object(logits_processor,
+                          "_gather_logits",
+                          return_value=mock_logits):
+            logits = logits_processor(lmhead, mock_output)
+    assert logits.shape == (2, 4, config.vocab_size)
