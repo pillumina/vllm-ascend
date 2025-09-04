@@ -486,9 +486,6 @@ def register_ascend_customop():
     from vllm_ascend.ops.vocab_parallel_embedding import (
         AscendLogitsProcessor, AscendParallelLMHead,
         AscendVocabParallelEmbedding)
-    CustomOp.register_oot(_decorated_op_cls=AscendQuickGELU, name="QuickGELU")
-    CustomOp.register_oot(_decorated_op_cls=AscendSiluAndMul,
-                          name="SiluAndMul")
     CustomOp.register_oot(_decorated_op_cls=AscendRotaryEmbedding,
                           name="RotaryEmbedding")
     CustomOp.register_oot(
