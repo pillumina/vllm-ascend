@@ -33,6 +33,7 @@ from torch_npu.npu.streams import Event
 from vllm.logger import logger
 
 import vllm_ascend.envs as envs_ascend
+from vllm_ascend.ascend_config import get_ascend_config
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
@@ -503,8 +504,6 @@ def register_ascend_customop():
         _decorated_op_cls=AscendDeepseekScalingRotaryEmbedding,
         name="DeepseekScalingRotaryEmbedding")
 
-    CustomOp.register_oot(_decorated_op_cls=AscendVocabParallelEmbedding,
-                          name="VocabParallelEmbedding")
     CustomOp.register_oot(_decorated_op_cls=AscendParallelLMHead,
                           name="ParallelLMHead")
     CustomOp.register_oot(_decorated_op_cls=AscendLogitsProcessor,
