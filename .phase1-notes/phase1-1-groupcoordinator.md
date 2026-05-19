@@ -155,19 +155,23 @@ all_ranks = [[[[[g0, g1]],
 **各组的 rank 分配**：
 
 ```
-TP 组（view -1, tp）：
-  TP[0] = [g0, g1]     TP rank 0
-  TP[1] = [g2, g3]     TP rank 0
-  TP[2] = [g4, g5]     TP rank 0
-  TP[3] = [g6, g7]     TP rank 0
-  → 4 个 TP 组，每组 2 个 rank（tp_size=2）
+TP 组（view -1, tp=2）：
+  torch.arange(8).reshape(1,2,2,1,2).flatten() = [g0,g1,g2,g3,g4,g5,g6,g7]
+  view(-1, 2) → [g0,g1,g2,g3] 和 [g4,g5,g6,g7]
+  TP[0] = [g0, g1]   → rank_in_group 分别是 0 和 1
+  TP[1] = [g2, g3]   → rank_in_group 分别是 0 和 1
+  TP[2] = [g4, g5]   → rank_in_group 分别是 0 和 1
+  TP[3] = [g6, g7]   → rank_in_group 分别是 0 和 1
+  → 4 个 TP 组，每组 2 个 rank（world_size=tp_size=2）
 
-DCP 组（reshape -1, dcp）：
-  DCP[0] = [g0, g4]    DCP rank 0（取每列的 dcp 维）
-  DCP[1] = [g1, g5]
-  DCP[2] = [g2, g6]
-  DCP[3] = [g3, g7]
-  → 4 个 DCP 组，每组 2 个 rank（dcp_size=2）
+DCP 组（flatten 再 reshape -1, dcp=2）：
+  flatten → [g0,g1,g2,g3,g4,g5,g6,g7]
+  reshape(-1, 2) → [[g0,g1],[g2,g3],[g4,g5],[g6,g7]]
+  DCP[0] = [g0, g1]   → rank 0 和 1 在同一组，rank_in_group 分别是 0 和 1
+  DCP[1] = [g2, g3]
+  DCP[2] = [g4, g5]
+  DCP[3] = [g6, g7]
+  → 4 个 DCP 组，每组 2 个 rank（world_size=dcp_size=2）
 
 PP 组（transpose(2,4), reshape）：
   PP[0] = [g0, g2]     PP rank 0
@@ -181,12 +185,12 @@ PP 组（transpose(2,4), reshape）：
 
 **不同组的 rank 在全局 rank 中的位置不同。**
 
-举例：全局 rank=0 的进程：
-- 在 TP 组中 rank_in_group=0（属于 [g0, g1] 组）
-- 在 DCP 组中 rank_in_group=0（属于 [g0, g4] 组）
-- 在 PP 组中 rank_in_group=0（属于 [g0, g2] 组）
+举例：全局 rank=0 的进程（配置 world_size=8, tp=2, dcp=2, pp=2）：
+- 在 TP 组中 rank_in_group=0（属于 [g0, g1] 组，rank 0 是组内第一个）
+- 在 DCP 组中 rank_in_group=0（属于 [g0, g1] 组，rank 0 是组内第一个）
+- 在 PP 组中 rank_in_group=0（属于 [g0, g2] 组，rank 0 是组内第一个）
 
-**这正是 HCCL mismatch 的根源之一**：当某段代码假设两个 rank 在 TP 组内通信，但实际它们属于不同的 DCP 组时，AllReduce 的 tensor shape 就不一致。
+**这正是 HCCL mismatch 的根源之一**：某段代码假设两个 rank 在同一个 TP 组内通信，但实际它们属于不同的 DCP 组时，AllReduce 的 tensor shape 就不一致。
 
 ---
 
@@ -279,6 +283,8 @@ NCCL AllReduce failed: misaligned data
 
 ---
 
-**答案**：A 错（TP rank 是组内序号，world rank 是全局序号）；B 对；C 错（DCP 可以独立于 TP）；D 对；E 对
+**答案**：A 对；B 对；C 错（TP world_size=tp_size，DCP world_size=dcp_size，可以不同）；D 对；E 对
+
+**勘误**：A 原写"错"实为"对"——两者的 rank 都来自 torch.distributed.get_rank()，是全局 rank；C 原写"可以独立"不够精确，应为"world_size 不同"
 
 *Phase 1.1 | v0.1 | 2026-05-19*
